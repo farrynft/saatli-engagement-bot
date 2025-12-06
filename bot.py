@@ -5,21 +5,18 @@ import logging
 from datetime import datetime, time as dt_time
 import asyncio
 
-# Logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# Config
 TOKEN = "7958058721:AAEXx4Zw3RYj_7Bnr_eMfUWcsjlxYbsfRBk"
 ADMIN_ID = 1004037545
 GROUP_ID = -1002158416026
 TOPIC_ID = 16848
 RULES_CHANNEL = "https://t.me/zaxengage/12/26852"
 
-# 3 SEANS
 SESSIONS = [
     {'name': 'Sabah', 'start': dt_time(10, 0), 'end': dt_time(12, 0)},
     {'name': 'Öğle', 'start': dt_time(14, 0), 'end': dt_time(15, 0)},
@@ -48,17 +45,13 @@ RULES_TEXT = """
 """
 
 def get_current_session():
-    """Şu anki seans hangisi?"""
     now = datetime.now().time()
-    
     for session in SESSIONS:
         if session['start'] <= now <= session['end']:
             return session['name']
-    
     return None
 
 def reset_session_data(session_name):
-    """Seans verilerini sıfırla"""
     session_data[session_name] = {
         'links': [],
         'users': set(),
@@ -67,7 +60,6 @@ def reset_session_data(session_name):
     logger.info(f"Seans verileri sıfırlandı: {session_name}")
 
 def reset_daily_stats():
-    """Günlük istatistikleri sıfırla"""
     global DAILY_STATS
     DAILY_STATS = {
         'links_shared': 0,
@@ -78,8 +70,6 @@ def reset_daily_stats():
     }
 
 async def send_session_summary(context: ContextTypes.DEFAULT_TYPE, session_name: str):
-    """Seans bitiminde özet gönder"""
-    
     session = session_data[session_name]
     
     if not session['links']:
@@ -87,7 +77,6 @@ async def send_session_summary(context: ContextTypes.DEFAULT_TYPE, session_name:
         reset_session_data(session_name)
         return
     
-    # 1. ÖNCE LİNKLERİ GÖNDER (Sadece linkler)
     summary = ""
     for link_data in session['links']:
         summary += f"{link_data['link']}\n"
@@ -103,7 +92,6 @@ async def send_session_summary(context: ContextTypes.DEFAULT_TYPE, session_name:
     except Exception as e:
         logger.error(f"Link özeti gönderilemedi: {e}")
     
-    # 2. SONRA KURALLARI GÖNDER
     try:
         await context.bot.send_message(
             chat_id=GROUP_ID,
@@ -118,8 +106,6 @@ async def send_session_summary(context: ContextTypes.DEFAULT_TYPE, session_name:
     reset_session_data(session_name)
 
 async def send_daily_report(context: ContextTypes.DEFAULT_TYPE):
-    """Admin'e günlük rapor gönder"""
-    
     report = f"""
 📊 GÜNLÜK RAPOR (SAATLİ MOD)
 ━━━━━━━━━━━━━━━━━━━━
@@ -145,8 +131,6 @@ async def send_daily_report(context: ContextTypes.DEFAULT_TYPE):
     reset_daily_stats()
 
 async def schedule_session_tasks(application: Application):
-    """Seans görevlerini planla"""
-    
     while True:
         now = datetime.now()
         next_event = None
@@ -194,9 +178,6 @@ async def schedule_session_tasks(application: Application):
             await send_daily_report(application)
 
 async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Kullanıcı link paylaştığında"""
-    
-    # Mesaj yoksa çık
     if not update.message:
         return
     
@@ -224,7 +205,6 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Mesaj silinemedi: {e}")
     
-    # KONTROL 1: KANAL AÇIK MI?
     if not current_session:
         DAILY_STATS['rejected_closed'] += 1
         
@@ -254,7 +234,6 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Kapalı saatte paylaşım: @{username}")
         return
     
-    # KONTROL 2: DUPLICATE
     if link in all_time_links:
         DAILY_STATS['rejected_duplicate'] += 1
         
@@ -271,7 +250,6 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Duplicate link: @{username}")
         return
     
-    # KONTROL 3: SEANS LİMİTİ
     if user.id in session_data[current_session]['users']:
         DAILY_STATS['rejected_session_limit'] += 1
         
@@ -287,8 +265,6 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         logger.info(f"Seans duplicate: @{username} - {current_session}")
         return
-    
-    # ✅ TÜM KONTROLLER GEÇTİ
     
     DAILY_STATS['links_shared'] += 1
     
@@ -318,13 +294,10 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Link paylaşılamadı: {e}")
 
 async def post_init(application: Application):
-    """Bot başladıktan sonra çalışacak"""
     asyncio.create_task(schedule_session_tasks(application))
     logger.info("Seans görevleri başlatıldı")
 
 def main():
-    """Bot'u başlat"""
-    
     app = Application.builder().token(TOKEN).post_init(post_init).build()
     
     app.add_handler(MessageHandler(
@@ -346,24 +319,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-```
-
----
-
-#### **📄 requirements.txt**
-```
-python-telegram-bot==20.7
-```
-
----
-
-#### **📄 runtime.txt**
-```
-python-3.11.9
-```
-
----
-
-#### **📄 Procfile**
-```
-worker: python bot.py
