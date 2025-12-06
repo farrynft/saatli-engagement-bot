@@ -188,3 +188,182 @@ async def schedule_session_tasks(application: Application):
         if event_type == 'end':
             logger.info(f"{session_name} seansı bitti, özet gönderiliyor...")
             await send_session_summary(application, session_name)
+        
+        if session_name == 'Akşam':
+            logger.info("Günün son seansı, admin raporu gönderiliyor...")
+            await send_daily_report(application)
+
+async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Kullanıcı link paylaştığında"""
+    
+    # Mesaj yoksa çık
+    if not update.message:
+        return
+    
+    if update.message.chat.id != GROUP_ID:
+        return
+    
+    message_thread_id = update.message.message_thread_id
+    if message_thread_id != TOPIC_ID:
+        return
+    
+    text = update.message.text or ""
+    urls = re.findall(r'https?://(?:twitter|x)\.com/\S+/status/\d+', text)
+    
+    if not urls:
+        return
+    
+    user = update.message.from_user
+    username = user.username or user.first_name
+    link = urls[0]
+    
+    current_session = get_current_session()
+    
+    try:
+        await update.message.delete()
+    except Exception as e:
+        logger.error(f"Mesaj silinemedi: {e}")
+    
+    # KONTROL 1: KANAL AÇIK MI?
+    if not current_session:
+        DAILY_STATS['rejected_closed'] += 1
+        
+        try:
+            now = datetime.now().time()
+            next_session = None
+            for session in SESSIONS:
+                if session['start'] > now:
+                    next_session = session
+                    break
+            
+            if not next_session:
+                next_session = SESSIONS[0]
+            
+            await context.bot.send_message(
+                chat_id=user.id,
+                text=f"⏰ Kanal şu an kapalı!\n\n"
+                     f"📅 SEANSLAR:\n"
+                     f"🌅 Sabah: 10:00-12:00\n"
+                     f"☀️ Öğle: 14:00-15:00\n"
+                     f"🌙 Akşam: 21:00-22:00\n\n"
+                     f"⏰ Bir sonraki seans: {next_session['name']} ({next_session['start'].strftime('%H:%M')})"
+            )
+        except:
+            pass
+        
+        logger.info(f"Kapalı saatte paylaşım: @{username}")
+        return
+    
+    # KONTROL 2: DUPLICATE
+    if link in all_time_links:
+        DAILY_STATS['rejected_duplicate'] += 1
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user.id,
+                text=f"❌ Bu link daha önce paylaşıldı!\n\n"
+                     f"Her link sadece 1 kez paylaşılabilir.\n\n"
+                     f"📚 Kurallar: {RULES_CHANNEL}"
+            )
+        except:
+            pass
+        
+        logger.info(f"Duplicate link: @{username}")
+        return
+    
+    # KONTROL 3: SEANS LİMİTİ
+    if user.id in session_data[current_session]['users']:
+        DAILY_STATS['rejected_session_limit'] += 1
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user.id,
+                text=f"❌ Bu seansta zaten paylaşım yaptın!\n\n"
+                     f"Her seansta sadece 1 link paylaşabilirsin.\n\n"
+                     f"📚 Kurallar: {RULES_CHANNEL}"
+            )
+        except:
+            pass
+        
+        logger.info(f"Seans duplicate: @{username} - {current_session}")
+        return
+    
+    # ✅ TÜM KONTROLLER GEÇTİ
+    
+    DAILY_STATS['links_shared'] += 1
+    
+    try:
+        sent_message = await context.bot.send_message(
+            chat_id=GROUP_ID,
+            message_thread_id=TOPIC_ID,
+            text=f"🔗 Link by @{username}\n\n{link}",
+            disable_web_page_preview=True
+        )
+        
+        link_data = {
+            'message_id': sent_message.message_id,
+            'user_id': user.id,
+            'username': username,
+            'link': link,
+            'timestamp': datetime.now()
+        }
+        
+        session_data[current_session]['links'].append(link_data)
+        session_data[current_session]['users'].add(user.id)
+        all_time_links.add(link)
+        
+        logger.info(f"Link paylaşıldı: @{username} - {current_session} seansı")
+        
+    except Exception as e:
+        logger.error(f"Link paylaşılamadı: {e}")
+
+async def post_init(application: Application):
+    """Bot başladıktan sonra çalışacak"""
+    asyncio.create_task(schedule_session_tasks(application))
+    logger.info("Seans görevleri başlatıldı")
+
+def main():
+    """Bot'u başlat"""
+    
+    app = Application.builder().token(TOKEN).post_init(post_init).build()
+    
+    app.add_handler(MessageHandler(
+        filters.TEXT & filters.Regex(r'https?://(?:twitter|x)\.com'),
+        handle_link
+    ))
+    
+    logger.info("")
+    logger.info("SAATLİ MOD BOT BAŞLATILDI")
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    logger.info(f"Group ID: {GROUP_ID}")
+    logger.info(f"Topic ID: {TOPIC_ID}")
+    for session in SESSIONS:
+        logger.info(f"   {session['name']}: {session['start'].strftime('%H:%M')}-{session['end'].strftime('%H:%M')}")
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    logger.info("")
+    
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+if __name__ == '__main__':
+    main()
+```
+
+---
+
+#### **📄 requirements.txt**
+```
+python-telegram-bot==20.7
+```
+
+---
+
+#### **📄 runtime.txt**
+```
+python-3.11.9
+```
+
+---
+
+#### **📄 Procfile**
+```
+worker: python bot.py
